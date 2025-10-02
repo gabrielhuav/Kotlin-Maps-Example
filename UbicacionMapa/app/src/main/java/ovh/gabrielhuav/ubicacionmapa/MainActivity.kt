@@ -2,11 +2,13 @@ package ovh.gabrielhuav.ubicacionmapa
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
-import android.webkit.GeolocationPermissions
-import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -28,43 +30,52 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        // Inicializar el cliente de ubicación
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-
         webView = findViewById(R.id.webView)
 
-        // Configurar el WebView
+        // Configurar WebView
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            setGeolocationEnabled(true)
-            // Configurar User-Agent personalizado para evitar bloqueos
-            userAgentString = "UbicacionMapaApp/1.0 Android"
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            allowFileAccess = true
+            allowContentAccess = true
         }
 
-        webView.webViewClient = WebViewClient()
-
-        // Configurar el cliente Chrome para manejar solicitudes de geolocalización
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onGeolocationPermissionsShowPrompt(
-                origin: String,
-                callback: GeolocationPermissions.Callback
+        webView.webViewClient = object : WebViewClient() {
+            override fun onReceivedError(
+                view: WebView?,
+                errorCode: Int,
+                description: String?,
+                failingUrl: String?
             ) {
-                // Verificar permisos de ubicación
-                if (checkLocationPermission()) {
-                    callback.invoke(origin, true, false)
-                } else {
-                    requestLocationPermission()
-                }
+                Toast.makeText(
+                    this@MainActivity,
+                    "Error: Verifica tu conexión a internet",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
 
-        // Verificar permisos antes de cargar el mapa
+        if (!isInternetAvailable()) {
+            Toast.makeText(this, "No hay conexión a internet", Toast.LENGTH_LONG).show()
+            return
+        }
+
         if (checkLocationPermission()) {
             loadMapWithCurrentLocation()
         } else {
             requestLocationPermission()
         }
+    }
+
+    private fun isInternetAvailable(): Boolean {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun checkLocationPermission(): Boolean {
@@ -88,11 +99,9 @@ class MainActivity : AppCompatActivity() {
             fusedLocationClient.lastLocation
                 .addOnSuccessListener { location: Location? ->
                     location?.let {
-                        // Usar CartoDB para mostrar la ubicación actual
-                        val html = createMapHtml(it.latitude, it.longitude)
-                        webView.loadDataWithBaseURL("https://example.com", html, "text/html", "UTF-8", null)
+                        val html = createGoogleMapsIframeHtml(it.latitude, it.longitude)
+                        webView.loadDataWithBaseURL("https://maps.google.com", html, "text/html", "UTF-8", null)
                     } ?: run {
-                        // Si la ubicación es nula, cargar un mapa predeterminado
                         loadDefaultMap()
                     }
                 }
@@ -105,47 +114,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createMapHtml(latitude: Double, longitude: Double): String {
+    private fun createGoogleMapsIframeHtml(latitude: Double, longitude: Double): String {
         return """
             <!DOCTYPE html>
             <html>
             <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-                <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
                 <style>
-                    body, html, #map {
-                        width: 100%;
-                        height: 100%;
+                    * {
                         margin: 0;
                         padding: 0;
+                        box-sizing: border-box;
+                    }
+                    body, html {
+                        width: 100%;
+                        height: 100%;
+                        overflow: hidden;
+                    }
+                    iframe {
+                        width: 100%;
+                        height: 100%;
+                        border: none;
                     }
                 </style>
             </head>
             <body>
-                <div id="map"></div>
-                <script>
-                    var map = L.map('map').setView([${latitude}, ${longitude}], 15);
-                    
-                    // Usar CartoDB en lugar de OpenStreetMap para evitar bloqueos
-                    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-                        subdomains: 'abcd',
-                        maxZoom: 19
-                    }).addTo(map);
-                    
-                    var marker = L.marker([${latitude}, ${longitude}]).addTo(map);
-                    marker.bindPopup("Mi ubicación").openPopup();
-                </script>
+                <iframe
+                    src="https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed"
+                    frameborder="0"
+                    scrolling="no"
+                    marginheight="0"
+                    marginwidth="0"
+                    loading="lazy"
+                    referrerpolicy="no-referrer-when-downgrade">
+                </iframe>
             </body>
             </html>
         """.trimIndent()
     }
 
     private fun loadDefaultMap() {
-        // Cargar un mapa centrado en la Ciudad de México como ubicación predeterminada
-        val defaultHtml = createMapHtml(19.4326, -99.1332)
-        webView.loadDataWithBaseURL("https://example.com", defaultHtml, "text/html", "UTF-8", null)
+        val defaultHtml = createGoogleMapsIframeHtml(19.4326, -99.1332)
+        webView.loadDataWithBaseURL("https://maps.google.com", defaultHtml, "text/html", "UTF-8", null)
     }
 
     override fun onRequestPermissionsResult(
@@ -165,6 +176,14 @@ class MainActivity : AppCompatActivity() {
                 ).show()
                 loadDefaultMap()
             }
+        }
+    }
+
+    override fun onBackPressed() {
+        if (webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
         }
     }
 }
