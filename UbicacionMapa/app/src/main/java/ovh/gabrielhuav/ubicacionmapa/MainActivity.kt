@@ -33,15 +33,22 @@ class MainActivity : AppCompatActivity() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         webView = findViewById(R.id.webView)
 
-        // Configurar WebView
+        // Configurar WebView para cargar INEGI
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            databaseEnabled = true
             loadWithOverviewMode = true
             useWideViewPort = true
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             allowFileAccess = true
             allowContentAccess = true
+            builtInZoomControls = true
+            displayZoomControls = false
+            setSupportZoom(true)
+            cacheMode = WebSettings.LOAD_DEFAULT
+            // User agent para que INEGI funcione correctamente
+            userAgentString = "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -53,7 +60,16 @@ class MainActivity : AppCompatActivity() {
             ) {
                 Toast.makeText(
                     this@MainActivity,
-                    "Error: Verifica tu conexión a internet",
+                    "Error al cargar INEGI: Verifica tu conexión",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                Toast.makeText(
+                    this@MainActivity,
+                    "Mapa INEGI cargado. Puedes buscar tu ubicación en el buscador.",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -72,7 +88,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isInternetAvailable(): Boolean {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -99,8 +115,9 @@ class MainActivity : AppCompatActivity() {
             fusedLocationClient.lastLocation
                 .addOnSuccessListener { location: Location? ->
                     location?.let {
-                        val html = createGoogleMapsIframeHtml(it.latitude, it.longitude)
-                        webView.loadDataWithBaseURL("https://maps.google.com", html, "text/html", "UTF-8", null)
+                        // Cargar INEGI MDM6 con parámetros de coordenadas
+                        val html = createINEGIIframeHtml(it.latitude, it.longitude)
+                        webView.loadDataWithBaseURL("https://gaia.inegi.org.mx", html, "text/html", "UTF-8", null)
                     } ?: run {
                         loadDefaultMap()
                     }
@@ -114,13 +131,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createGoogleMapsIframeHtml(latitude: Double, longitude: Double): String {
+    private fun createINEGIIframeHtml(latitude: Double, longitude: Double): String {
+        // INEGI MDM6 con parámetros para centrar en coordenadas
+        // Formato: ?v=coordX,coordY,zoom
+        val zoom = 15
         return """
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
                     * {
                         margin: 0;
@@ -132,22 +152,57 @@ class MainActivity : AppCompatActivity() {
                         height: 100%;
                         overflow: hidden;
                     }
+                    .header {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        background: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
+                        color: white;
+                        padding: 12px;
+                        text-align: center;
+                        font-family: Arial, sans-serif;
+                        font-size: 14px;
+                        font-weight: bold;
+                        z-index: 1000;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    }
+                    .coords-info {
+                        position: absolute;
+                        bottom: 10px;
+                        left: 10px;
+                        background: white;
+                        padding: 10px;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                        z-index: 1000;
+                        font-size: 11px;
+                        font-family: Arial, sans-serif;
+                    }
+                    .coords-info strong {
+                        color: #8B4513;
+                    }
                     iframe {
                         width: 100%;
                         height: 100%;
                         border: none;
+                        padding-top: 44px;
                     }
                 </style>
             </head>
             <body>
+                <div class="header">
+                    🗺️ INEGI - Mapa Digital de México V6
+                </div>
+                <div class="coords-info">
+                    <strong>📍 Mi Ubicación</strong><br>
+                    Lat: ${String.format("%.6f", latitude)}<br>
+                    Lng: ${String.format("%.6f", longitude)}
+                </div>
                 <iframe
-                    src="https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed"
-                    frameborder="0"
-                    scrolling="no"
-                    marginheight="0"
-                    marginwidth="0"
-                    loading="lazy"
-                    referrerpolicy="no-referrer-when-downgrade">
+                    src="https://gaia.inegi.org.mx/mdm6/?v=${longitude},${latitude},$zoom"
+                    allowfullscreen
+                    loading="lazy">
                 </iframe>
             </body>
             </html>
@@ -155,8 +210,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadDefaultMap() {
-        val defaultHtml = createGoogleMapsIframeHtml(19.4326, -99.1332)
-        webView.loadDataWithBaseURL("https://maps.google.com", defaultHtml, "text/html", "UTF-8", null)
+        val defaultHtml = createINEGIIframeHtml(19.4326, -99.1332)
+        webView.loadDataWithBaseURL("https://gaia.inegi.org.mx", defaultHtml, "text/html", "UTF-8", null)
     }
 
     override fun onRequestPermissionsResult(
@@ -171,7 +226,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(
                     this,
-                    "Se requiere permiso de ubicación para mostrar tu posición",
+                    "Se requiere permiso de ubicación",
                     Toast.LENGTH_SHORT
                 ).show()
                 loadDefaultMap()
